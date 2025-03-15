@@ -1,0 +1,380 @@
+# 1. Main Terraform Configuration (terraform/main.tf)
+
+provider "aws" {
+  region = var.aws_region
+}
+
+# S3 Buckets Module
+module "s3_buckets" {
+  source = "./modules/s3"
+  
+  bronze_bucket_name = var.bronze_bucket_name
+  silver_bucket_name = var.silver_bucket_name
+  gold_bucket_name   = var.gold_bucket_name
+  
+  tags = var.tags
+}
+
+# Lambda Functions Module
+module "lambda_functions" {
+  source = "./modules/lambda"
+  
+  bronze_to_silver_function_name = var.bronze_to_silver_function_name
+  silver_to_gold_function_name   = var.silver_to_gold_function_name
+  
+  bronze_bucket_name = module.s3_buckets.bronze_bucket_name
+  silver_bucket_name = module.s3_buckets.silver_bucket_name
+  gold_bucket_name   = module.s3_buckets.gold_bucket_name
+  
+  tags = var.tags
+  
+  depends_on = [module.s3_buckets]
+}
+
+# 2. S3 Bucket Module (terraform/modules/s3/main.tf)
+
+resource "aws_s3_bucket" "bronze_bucket" {
+  bucket = var.bronze_bucket_name
+  
+  tags = merge(
+    var.tags,
+    {
+      Name = "Bronze Data Layer"
+    }
+  )
+}
+
+resource "aws_s3_bucket" "silver_bucket" {
+  bucket = var.silver_bucket_name
+  
+  tags = merge(
+    var.tags,
+    {
+      Name = "Silver Data Layer"
+    }
+  )
+}
+
+resource "aws_s3_bucket" "gold_bucket" {
+  bucket = var.gold_bucket_name
+  
+  tags = merge(
+    var.tags,
+    {
+      Name = "Gold Data Layer"
+    }
+  )
+}
+
+# Configure bucket notifications for bronze bucket
+resource "aws_s3_bucket_notification" "bronze_notification" {
+  bucket = aws_s3_bucket.bronze_bucket.id
+
+  lambda_function {
+    lambda_function_arn = var.bronze_to_silver_lambda_arn
+    events              = ["s3:ObjectCreated:*"]
+    filter_prefix       = "bronze_"
+    filter_suffix       = ".csv"
+  }
+}
+
+# Configure bucket notifications for silver bucket
+resource "aws_s3_bucket_notification" "silver_notification" {
+  bucket = aws_s3_bucket.silver_bucket.id
+
+  lambda_function {
+    lambda_function_arn = var.silver_to_gold_lambda_arn
+    events              = ["s3:ObjectCreated:*"]
+    filter_prefix       = "silver_"
+    filter_suffix       = ".csv"
+  }
+}
+
+# 3. Lambda Module (terraform/modules/lambda/main.tf)
+
+# IAM role for Lambda functions
+resource "aws_iam_role" "lambda_role" {
+  name = "data_processing_lambda_role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+# Policy for S3 access
+resource "aws_iam_policy" "s3_access_policy" {
+  name        = "lambda_s3_access_policy"
+  description = "Policy for Lambda S3 access"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:ListBucket"
+        ]
+        Effect = "Allow"
+        Resource = [
+          "arn:aws:s3:::${var.bronze_bucket_name}",
+          "arn:aws:s3:::${var.bronze_bucket_name}/*",
+          "arn:aws:s3:::${var.silver_bucket_name}",
+          "arn:aws:s3:::${var.silver_bucket_name}/*",
+          "arn:aws:s3:::${var.gold_bucket_name}",
+          "arn:aws:s3:::${var.gold_bucket_name}/*"
+        ]
+      }
+    ]
+  })
+}
+
+# Attach policy to role
+resource "aws_iam_role_policy_attachment" "lambda_s3_policy_attachment" {
+  role       = aws_iam_role.lambda_role.name
+  policy_arn = aws_iam_policy.s3_access_policy.arn
+}
+
+# Attach basic Lambda execution policy
+resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
+  role       = aws_iam_role.lambda_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# Bronze to Silver Lambda function
+resource "aws_lambda_function" "bronze_to_silver" {
+  function_name = var.bronze_to_silver_function_name
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.9"
+  
+  # Lambda deployment package
+  filename      = "${path.module}/../../aws/lambda/bronze_to_silver/lambda_function.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../aws/lambda/bronze_to_silver/lambda_function.zip")
+  
+  role = aws_iam_role.lambda_role.arn
+  
+  timeout     = 60
+  memory_size = 256
+  
+  environment {
+    variables = {
+      SOURCE_BUCKET      = var.bronze_bucket_name
+      DESTINATION_BUCKET = var.silver_bucket_name
+    }
+  }
+  
+  tags = var.tags
+}
+
+# Silver to Gold Lambda function
+resource "aws_lambda_function" "silver_to_gold" {
+  function_name = var.silver_to_gold_function_name
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.9"
+  
+  # Lambda deployment package
+  filename      = "${path.module}/../../aws/lambda/silver_to_gold/lambda_function.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../aws/lambda/silver_to_gold/lambda_function.zip")
+  
+  role = aws_iam_role.lambda_role.arn
+  
+  timeout     = 60
+  memory_size = 256
+  
+  environment {
+    variables = {
+      SOURCE_BUCKET      = var.silver_bucket_name
+      DESTINATION_BUCKET = var.gold_bucket_name
+    }
+  }
+  
+  tags = var.tags
+}
+
+# S3 trigger permissions for Bronze to Silver Lambda
+resource "aws_lambda_permission" "bronze_bucket_permission" {
+  statement_id  = "AllowExecutionFromS3Bronze"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.bronze_to_silver.function_name
+  principal     = "s3.amazonaws.com"
+  source_arn    = "arn:aws:s3:::${var.bronze_bucket_name}"
+}
+
+# S3 trigger permissions for Silver to Gold Lambda
+resource "aws_lambda_permission" "silver_bucket_permission" {
+  statement_id  = "AllowExecutionFromS3Silver"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.silver_to_gold.function_name
+  principal     = "s3.amazonaws.com"
+  source_arn    = "arn:aws:s3:::${var.silver_bucket_name}"
+}
+
+# 4. Variables (terraform/variables.tf)
+
+variable "aws_region" {
+  description = "AWS region"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "bronze_bucket_name" {
+  description = "Name of the bronze S3 bucket"
+  type        = string
+}
+
+variable "silver_bucket_name" {
+  description = "Name of the silver S3 bucket"
+  type        = string
+}
+
+variable "gold_bucket_name" {
+  description = "Name of the gold S3 bucket"
+  type        = string
+}
+
+variable "bronze_to_silver_function_name" {
+  description = "Name of the bronze to silver Lambda function"
+  type        = string
+  default     = "bronze_to_silver_transformation"
+}
+
+variable "silver_to_gold_function_name" {
+  description = "Name of the silver to gold Lambda function"
+  type        = string
+  default     = "silver_to_gold_transformation"
+}
+
+variable "tags" {
+  description = "Tags for resources"
+  type        = map(string)
+  default     = {
+    Project = "DataEngineeringExam"
+  }
+}
+
+# 5. Terragrunt Root Configuration (terragrunt/terragrunt.hcl)
+
+# Set global terragrunt settings
+remote_state {
+  backend = "s3"
+  
+  generate = {
+    path      = "backend.tf"
+    if_exists = "overwrite"
+  }
+  
+  config = {
+    bucket         = "de-exam-terraform-state-${get_aws_account_id()}"
+    key            = "${path_relative_to_include()}/terraform.tfstate"
+    region         = "us-east-1"
+    encrypt        = true
+    dynamodb_table = "de-exam-terraform-locks"
+  }
+}
+
+# Generate provider.tf file
+generate "provider" {
+  path      = "provider.tf"
+  if_exists = "overwrite"
+  contents  = <<EOF
+provider "aws" {
+  region = "${local.aws_region}"
+}
+EOF
+}
+
+# Define inputs that are common across all environments
+inputs = {
+  tags = {
+    Project     = "DataEngineeringExam"
+    ManagedBy   = "Terragrunt"
+    Environment = local.env
+  }
+}
+
+# Extract environment-specific variables
+locals {
+  # Load variables from the environment-specific vars file
+  env_vars = read_terragrunt_config(find_in_parent_folders("env.hcl"))
+  
+  env        = local.env_vars.locals.environment
+  aws_region = local.env_vars.locals.aws_region
+}
+
+# 6. Dev Environment Configuration (terragrunt/env/dev/env.hcl)
+
+locals {
+  environment = "dev"
+  aws_region  = "us-east-1"
+}
+
+# 7. Dev S3 Buckets Configuration (terragrunt/env/dev/s3_buckets/terragrunt.hcl)
+
+include {
+  path = find_in_parent_folders()
+}
+
+terraform {
+  source = "../../../terraform/modules/s3"
+}
+
+inputs = {
+  bronze_bucket_name = "de-exam-bronze-dev"
+  silver_bucket_name = "de-exam-silver-dev"
+  gold_bucket_name   = "de-exam-gold-dev"
+  
+  # These will be populated after the Lambda functions are created
+  bronze_to_silver_lambda_arn = dependency.lambda.outputs.bronze_to_silver_lambda_arn
+  silver_to_gold_lambda_arn   = dependency.lambda.outputs.silver_to_gold_lambda_arn
+}
+
+# Define dependencies
+dependency "lambda" {
+  config_path = "../lambda_functions"
+  
+  # Mock outputs for the initial plan/apply
+  mock_outputs = {
+    bronze_to_silver_lambda_arn = "arn:aws:lambda:us-east-1:123456789012:function:mock-function"
+    silver_to_gold_lambda_arn   = "arn:aws:lambda:us-east-1:123456789012:function:mock-function"
+  }
+}
+
+# 8. Dev Lambda Functions Configuration (terragrunt/env/dev/lambda_functions/terragrunt.hcl)
+
+include {
+  path = find_in_parent_folders()
+}
+
+terraform {
+  source = "../../../terraform/modules/lambda"
+}
+
+inputs = {
+  bronze_bucket_name = dependency.s3.outputs.bronze_bucket_name
+  silver_bucket_name = dependency.s3.outputs.silver_bucket_name
+  gold_bucket_name   = dependency.s3.outputs.gold_bucket_name
+  
+  bronze_to_silver_function_name = "bronze_to_silver_transformation_dev"
+  silver_to_gold_function_name   = "silver_to_gold_transformation_dev"
+}
+
+# Define dependencies
+dependency "s3" {
+  config_path = "../s3_buckets"
+  
+  # Mock outputs for the initial plan/apply
+  mock_outputs = {
+    bronze_bucket_name = "mock-bronze-bucket"
+    silver_bucket_name = "mock-silver-bucket"
+    gold_bucket_name   = "mock-gold-bucket"
+  }
+}

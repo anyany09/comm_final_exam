@@ -1,0 +1,14 @@
+[project]
+name = "final-exam-prep-01"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "boto3>=1.37.10",
+    "pandas>=2.2.3",
+    "pyarrow>=19.0.1",
+]
+
+
+[tool.setuptools]
+packages = ["src", "utils"]
