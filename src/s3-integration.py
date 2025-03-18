@@ -6,8 +6,10 @@ This module handles the integration between the local SQLite medallion architect
 and AWS S3 storage, providing functions to upload data from each layer to corresponding
 S3 buckets with proper error handling, retries, and verification.
 """
-
+import sys
 import os
+sys.path.append(os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
+
 import logging
 import hashlib
 import time
@@ -25,7 +27,6 @@ from utils.logger import setup_logger
 
 # Set up logger
 logger = setup_logger('s3_integration')
-
 # Default configuration
 DEFAULT_BUCKET_PREFIX = "data-engineering-exam"
 DEFAULT_REGION = "eu-central-1"

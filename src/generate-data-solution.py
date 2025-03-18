@@ -9,6 +9,9 @@ typical of real-world financial data.
 The script generates between 20,000-30,000 records by default and saves them to a CSV file.
 """
 
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 import pandas as pd
 import csv
 import random
