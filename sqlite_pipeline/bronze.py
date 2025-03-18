@@ -128,7 +128,7 @@ def ingest_data(csv_file: str, db_file: str) -> bool:
 if __name__ == "__main__":
     BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
     CSV_FILE = os.path.join(BASE_DIR, "data", "sample", "transactions.csv")
-    DB_FILE = os.path.join(BASE_DIR, "data", "bronze_raw.db")  # Changed to use data folder
+    DB_FILE = os.path.join(BASE_DIR, "data", "bronze_raw.db")  # Using data folder
 
     logger.info(f"Ingesting data from: {CSV_FILE}")
     logger.info(f"Saving database to: {DB_FILE}")

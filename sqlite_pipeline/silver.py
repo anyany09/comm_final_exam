@@ -32,7 +32,7 @@ def transform_bronze_to_silver(bronze_db: str, silver_db: str) -> bool:
     Only new bronze records (not already in silver_transactions) will be processed.
     """
     try:
-        # Connect to bronze database and load all records.
+        # Load all records from bronze
         bronze_conn = sqlite3.connect(bronze_db)
         bronze_df = pd.read_sql("SELECT * FROM bronze_transactions", bronze_conn)
         bronze_conn.close()
@@ -43,20 +43,20 @@ def transform_bronze_to_silver(bronze_db: str, silver_db: str) -> bool:
 
         logger.info(f"Read {len(bronze_df)} records from bronze layer for silver transformation.")
 
-        # Connect to silver database and create silver_transactions table if needed.
+        # Connect to silver and create table if necessary.
         silver_conn = sqlite3.connect(silver_db)
         silver_cursor = silver_conn.cursor()
         create_silver_table(silver_cursor)
         silver_conn.commit()
 
-        # Get transaction IDs already in silver.
+        # Get existing IDs from silver
         try:
             existing_ids_df = pd.read_sql("SELECT transaction_id FROM silver_transactions", silver_conn)
             existing_ids = set(existing_ids_df['transaction_id'].tolist())
         except Exception:
             existing_ids = set()
 
-        # Filter out bronze records already present in silver.
+        # Filter new records not in silver.
         new_bronze_df = bronze_df if not existing_ids else bronze_df[~bronze_df['transaction_id'].isin(existing_ids)]
         logger.info(f"{len(new_bronze_df)} new records will be transformed into silver layer.")
 
@@ -64,7 +64,7 @@ def transform_bronze_to_silver(bronze_db: str, silver_db: str) -> bool:
             logger.info("No new records to process for silver layer.")
             return True
 
-        # Transform data: convert timestamp into date and time, and validate records.
+        # Transform: convert timestamp to date and time; set validation status.
         new_bronze_df['transaction_date'] = pd.to_datetime(new_bronze_df['timestamp']).dt.date
         new_bronze_df['transaction_time'] = pd.to_datetime(new_bronze_df['timestamp']).dt.time
         new_bronze_df['validation_status'] = 'VALID'
@@ -72,7 +72,7 @@ def transform_bronze_to_silver(bronze_db: str, silver_db: str) -> bool:
         new_bronze_df.loc[~new_bronze_df['customer_id'].str.startswith('CUST'), 'validation_status'] = 'INVALID: Invalid customer ID'
         new_bronze_df = new_bronze_df.drop(columns=['timestamp'])
 
-        # Insert transformed data into silver_transactions.
+        # Insert transformed new records into silver.
         new_bronze_df.to_sql('silver_transactions', silver_conn, if_exists='append', index=False)
         silver_conn.commit()
         logger.info(f"Successfully transformed {len(new_bronze_df)} new records into silver layer.")
@@ -91,8 +91,8 @@ def transform_bronze_to_silver(bronze_db: str, silver_db: str) -> bool:
 if __name__ == "__main__":
     BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
     CSV_FILE = os.path.join(BASE_DIR, "data", "sample", "transactions.csv")
-    BRONZE_DB = os.path.join(BASE_DIR, "data", "bronze_raw.db")   # Bronze data source in data folder
-    SILVER_DB = os.path.join(BASE_DIR, "data", "silver_raw.db")     # Silver data destination in data folder
+    BRONZE_DB = os.path.join(BASE_DIR, "data", "bronze_raw.db")   # Bronze data source
+    SILVER_DB = os.path.join(BASE_DIR, "data", "silver_raw.db")     # Silver destination
 
     logger.info(f"Ingesting data from: {CSV_FILE} into bronze database: {BRONZE_DB}")
     if not os.path.exists(CSV_FILE):

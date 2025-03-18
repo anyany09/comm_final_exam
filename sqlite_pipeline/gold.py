@@ -45,13 +45,13 @@ def aggregate_silver_to_gold(silver_db: str, gold_db: str) -> bool:
     """
     gold_conn = None
     try:
-        # Connect to gold database and create gold_daily_summary table if needed.
+        # Connect to gold and create gold_daily_summary table if needed.
         gold_conn = sqlite3.connect(gold_db)
         cursor = gold_conn.cursor()
         create_gold_table(cursor)
         gold_conn.commit()
         
-        # Attach the silver database as 'silver_db'
+        # Attach silver database as 'silver_db' to allow cross-database query.
         gold_conn.execute(f"ATTACH DATABASE '{silver_db}' AS silver_db")
         
         query = """
@@ -71,7 +71,7 @@ def aggregate_silver_to_gold(silver_db: str, gold_db: str) -> bool:
             logger.info("No new data to aggregate for gold layer.")
             return True
         
-        # Insert aggregated data into gold_daily_summary table in gold_db.
+        # Insert aggregated data into gold_daily_summary.
         df.to_sql('gold_daily_summary', gold_conn, if_exists='append', index=False)
         gold_conn.commit()
         logger.info(f"Successfully aggregated {len(df)} records into gold layer.")
@@ -87,10 +87,8 @@ def aggregate_silver_to_gold(silver_db: str, gold_db: str) -> bool:
 
 if __name__ == "__main__":
     BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-    # Use data folder for gold database
-    GOLD_DB = os.path.join(BASE_DIR, "data", "gold_raw.db")
-    # Also specify silver database location
-    SILVER_DB = os.path.join(BASE_DIR, "data", "silver_raw.db")
+    GOLD_DB = os.path.join(BASE_DIR, "data", "gold_raw.db")  # Using data folder
+    SILVER_DB = os.path.join(BASE_DIR, "data", "silver_raw.db")  # Silver source
 
     logger.info(f"Aggregating data into gold database: {GOLD_DB}")
 
