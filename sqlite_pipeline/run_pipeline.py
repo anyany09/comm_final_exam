@@ -8,11 +8,13 @@ import sqlite3
 import datetime  # added to generate timestamp
 import shutil    # For copying .db files
 import boto3     # For S3 operations
+from dotenv import load_dotenv  # add this import
+load_dotenv()  # load environment variables from .env file
 
-# Add AWS credentials and region variables
-AWS_ACCESS_KEY_ID = "YOUR_ACCESS_KEY"       # Replace with your actual access key
-AWS_SECRET_ACCESS_KEY = "YOUR_SECRET_KEY"   # Replace with your actual secret key
-AWS_REGION = "us-east-1"                    # Replace with your AWS region as needed
+# Read AWS credentials and region from environment variables
+AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY")
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -46,7 +48,7 @@ def download_file_from_s3(bucket: str, s3_key: str, local_file: str) -> None:
     s3_client = boto3.client('s3',
                              aws_access_key_id=AWS_ACCESS_KEY_ID,
                              aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
-                             region_name=AWS_REGION)
+                             region_name=AWS_REGION)  # fixed to use AWS_REGION variable
     try:
         s3_client.download_file(bucket, s3_key, local_file)
         logger.info(f"Downloaded s3://{bucket}/{s3_key} to {local_file}")
@@ -114,6 +116,13 @@ if __name__ == "__main__":
     upload_file_to_s3(bronze_output, bucket_bronze, os.path.basename(bronze_output))
     upload_file_to_s3(silver_output, bucket_silver, os.path.basename(silver_output))
     upload_file_to_s3(gold_output, bucket_gold, os.path.basename(gold_output))
+
+    # NEW: Upload .db files to S3.
+    upload_file_to_s3(bronze_db_copy, bucket_bronze, os.path.basename(bronze_db_copy))
+    upload_file_to_s3(silver_db_copy, bucket_silver, os.path.basename(silver_db_copy))
+    upload_file_to_s3(gold_db_copy, bucket_gold, os.path.basename(gold_db_copy))
+    
+    logger.info("Exported files (Parquet and .db) have been uploaded to their respective S3 buckets.")
 
     # Optionally, download example (uncomment below if you wish to test download):
     # download_file_from_s3(bucket_bronze, os.path.basename(bronze_output), os.path.join(OUTPUT_DIR, f"downloaded_{os.path.basename(bronze_output)}"))
