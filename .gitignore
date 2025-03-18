@@ -7,7 +7,7 @@ terraform/terraform.tfstate.backup
 .idea
 .vscode
 .venv
-
+.env
 data/
 database
 logs
