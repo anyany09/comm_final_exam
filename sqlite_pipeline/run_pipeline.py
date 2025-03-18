@@ -50,9 +50,11 @@ if __name__ == "__main__":
     # Exporting outputs directly to the data directory
     OUTPUT_DIR = os.path.join(BASE_DIR, "data")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    bronze_output = os.path.join(OUTPUT_DIR, "bronze_transactions.parquet")  # New bronze output
     silver_output = os.path.join(OUTPUT_DIR, "silver_transactions.parquet")
     gold_output = os.path.join(OUTPUT_DIR, "gold_daily_summary.parquet")
     
+    export_table_to_parquet(BRONZE_DB, "bronze_transactions", bronze_output)
     export_table_to_parquet(SILVER_DB, "silver_transactions", silver_output)
     export_table_to_parquet(GOLD_DB, "gold_daily_summary", gold_output)
     
